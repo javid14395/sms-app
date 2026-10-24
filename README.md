@@ -1,99 +1,61 @@
-# sms-app
+# sms-app — Consent-first SMS Desk (v2.0.0)
 
-## Consent-first SMS Desk
+A Windows, macOS, and Linux Python desktop application for **human-confirmed** Android SMS composition workflows over USB or Wi-Fi Android Debug Bridge (`adb`). It is built for lawful, explicitly opted-in recipients only. It never simulates tapping Send, never bypasses Android or carrier permissions, and never marks a message sent or delivered without explicit evidence.
 
-A Windows/macOS/Linux Python desktop utility for **human-confirmed** SMS workflows
-with Android devices connected over USB or Wi-Fi ADB. It is designed for lawful,
-explicitly opted-in recipients only. It does not automate tapping Send, bypass
-Android/carrier controls, or claim that an ADB intent proves delivery.
-
-## Requirements / launch
-
-- Python 3.10 or newer (standard library only)
-- Android platform-tools (`adb`) on `PATH`, or configure `AdbClient(executable=...)`
-- An Android device with USB debugging enabled and an authorized computer, or
-  Wireless debugging enabled
-
-Run from the project directory:
+## Architecture & Repository Structure
 
 ```text
+sms-app/
+├── main.py
+├── README.md
+├── smsdesk/
+│   ├── __init__.py
+│   ├── app.py
+│   ├── adb.py
+│   ├── dispatch.py
+│   ├── storage.py
+│   ├── validation.py
+│   └── crash.py
+└── tests/
+    └── test_core.py
+```
+
+- `main.py`: Tkinter desktop entry point.
+- `smsdesk/app.py`: 8-tab navy/blue/cyan desktop interface (`#0F172A` / `#1E293B` / `#007ACC` / `#06B6D4`), non-blocking tooltips, background worker orchestration, and event queue polling.
+- `smsdesk/adb.py`: Safe `subprocess.run(..., shell=False)` ADB execution, USB/Wi-Fi discovery, brand/model resolution (fixing the brand-prefix edge case), Android 11+ wireless pairing, legacy USB-initialized TCP/IP mode, bounded reconnect with backoff, messaging activity diagnostics, and `MockAdbClient` for dry-run testing.
+- `smsdesk/dispatch.py`: Cooperative background worker enforcing one active worker per device, transactional job claiming, `composer_staged` state tracking, pause-freezing monotonic countdowns, and once-per-boundary cooldowns.
+- `smsdesk/storage.py`: Thread-local SQLite persistence (`SCHEMA_VERSION = 3`), automatic pre-migration online backups, v1->v2->v3 schema migrations, campaigns, batches, saved templates, device registry, settings, and sanitized audit logs.
+- `smsdesk/validation.py`: GSM 03.38 (basic + 2-septet extension table) and UCS-2 (UTF-16BE) segment accounting, `{variable}` personalization rendering and per-recipient limit checks, CSV header preview, column mapping, and rejected-row CSV export.
+- `smsdesk/crash.py`: Main-thread, worker-thread, and Tkinter callback crash handlers with redaction of phone numbers, `smsto:` URIs, pairing codes, and secrets, automatic file rotation, and sanitized `.zip` support bundle creation.
+
+## Requirements & Installation
+
+- **Python**: Python 3.10 or newer (uses only the Python standard library; no third-party pip packages required).
+- **Tkinter**: Included with standard Windows/macOS Python installers (`python3-tk` on Debian/Ubuntu Linux).
+- **Android SDK Platform-Tools**: `adb` available on `PATH` or configured in the **7. Settings** tab.
+
+## Launch & Test Commands
+
+Run the desktop application from the repository root:
+
+```bash
 python main.py
 ```
 
-The local database defaults to `sms_history_pro.db`; crash reports go to
-`crash_reports/`. These paths are relative to the current working directory.
-Keep the database directory access-controlled because it contains recipient
-numbers and message content.
+Run the full unit and regression test suite (uses temporary SQLite databases and mocked ADB transports; never contacts real recipients or devices):
 
-The desktop UI uses a dark navy/blue palette with cyan focus and action accents,
-and stacks its recipient/device panels when the window is narrow. Device choices
-show Android brand/model properties when available, while retaining the ADB
-serial for unambiguous targeting.
-
-## Consent and suppression contract
-
-CSV must contain a `phone` column and a **per-row** `consent` or `opt_in` column.
-Accepted affirmative values are `yes`, `true`, `1`, and `opted-in` (case-insensitive).
-Every other row is rejected from the eligible set and listed with its row number.
-An unchecked global checkbox is never treated as consent. Keep consent source and
-proof in your own records; this app records the import filename and import time,
-not the original evidence of consent. Phone formatting separators are removed;
-the number itself is not guessed or rewritten.
-
-Use “Suppress” immediately when a recipient opts out. Suppression is persistent,
-wins over later imports, and is checked again immediately before staging. Maintain
-an appropriate opt-out process outside this application too; it cannot monitor
-incoming SMS or detect replies.
-
-CSV example:
-
-```csv
-phone,consent
-+14155550101,yes
-+14155550102,no
-```
-
-## Sending behavior / operational timing
-
-The app validates one message to a single SMS segment (no multipart messages):
-up to 160 GSM septets, or up to 70 UTF-16 units for UCS-2 content, with an
-additional 160-code-point input ceiling. Oversized input is visibly truncated
-to a single-segment boundary. It validates device serial, recipient eligibility,
-and bounded delay/batch/cooldown settings. It creates auditable batches and opens Android's `SENDTO` SMS composer
-for one recipient at a time. A person must check the recipient/message, press
-Send on the device, and then explicitly confirm in the desktop app. ADB cannot
-reliably verify the send action across arbitrary messaging applications; records
-therefore say `user_confirmed`, not device-verified or delivered. Declined,
-interrupted, or failed entries remain auditable. Stop leaves unprocessed entries
-pending; they are not silently resent after restart. “Retry failed” creates a
-new batch for failed entries only, re-checks consent/suppression, and requires
-confirmation. “Resume pending” is separately explicit, skips sent/failed rows,
-and warns the operator to check Android sent history first because an interruption
-may occur between sending on-device and recording the user's confirmation. This
-is a deliberate anti-duplication safeguard.
-
-Delay and cooldown are explicit operator-configured operational intervals, not
-tools for mimicking human behavior or avoiding spam flags, carrier safeguards,
-or enforcement. Set them only to meet documented organizational or legal
-requirements. The application does not attempt to bypass sending limits or
-controls. Comply with local law, carrier terms, platform rules, applicable
-quiet-hour/identification requirements, and any stricter organizational limits.
-
-## History / recovery
-
-`sms_history_pro.db` stores contact consent/import source, suppression state,
-batch metadata, message text, device serial, per-recipient pending/sent/failed
-state, UTC timestamps, attempt count, user-attestation type, and errors. SQLite
-uses foreign keys, transactions, indexes, a schema version with a v1-to-v2
-migration, durable batch state-transition events, and isolated thread-local
-connections. Interrupted batches are marked failed on startup while unprocessed
-messages remain pending. Back up the database securely.
-
-## Tests
-
-```text
+```bash
 python -m unittest discover -s tests -v
 ```
 
-Tests use temporary SQLite files and mocked ADB; no physical Android device is
-required. A desktop Tk session is needed for the interactive UI.
+## Database Migration & Backup Instructions
+
+1. **Automatic Pre-Migration Backup**: When `HistoryStore.initialize()` detects an existing `sms_history_pro.db` at schema v1 or v2, it automatically uses SQLite's online `Connection.backup()` API to create a consistent backup in `db_backups/sms_history_pro-pre-v2-to-v3-<timestamp>.db` before executing `BEGIN IMMEDIATE` schema migrations to v3.
+2. **Manual Backup & Restore**: Open **7. Settings -> Back Up Database Now…** or call `store.backup_database()`. To restore after a failed migration or disk issue, use **Restore Database from Backup…** (which verifies `PRAGMA integrity_check` and `schema_meta` before replacing the active file, keeping a safety copy if anything fails).
+
+## Actual Sending vs. Manual Composer Staging
+
+- **Current ADB Transport**: `AdbClient.stage_sms()` dispatches `am start -a android.intent.action.SENDTO -d smsto:<phone> --es sms_body <message>`. On modern stock Android (Android 10–15), unprivileged ADB shell cannot reliably or portably send SMS directly without opening the user-facing messaging app, and ADB exit code `0` only confirms that the `SENDTO` intent was handed to Android's ActivityManager.
+- **Truthful Recording**: Opening the composer records `status='pending', verification='composer_staged'`. Only when the operator taps Send on the phone and clicks **Yes** in the desktop confirmation dialog does the record transition to `status='sent', verification='user_confirmed', delivery_status='unverified'`.
+- **Why Key-Event Simulation Is Forbidden**: Sending `input keyevent KEYCODE_DPAD_RIGHT` + `KEYCODE_ENTER` is brittle across OEM messaging apps, screen locks, dual-SIM dialogs, and IME layouts, and can accidentally trigger unintended UI actions or mark unsent messages as sent.
+- **Supported Alternatives (Require Separate Approval)**: True hands-free campaign dispatch after a single campaign-level approval requires either a dedicated, user-authorized Android companion service holding the `SEND_SMS` permission with `SmsManager` `sentIntent`/`deliveryIntent` callbacks, or an external carrier/CPaaS API with webhook delivery receipts.
