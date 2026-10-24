@@ -1,4 +1,6 @@
-# Consent-first SMS Desk
+# sms-app
+
+## Consent-first SMS Desk
 
 A Windows/macOS/Linux Python desktop utility for **human-confirmed** SMS workflows
 with Android devices connected over USB or Wi-Fi ADB. It is designed for lawful,
